@@ -1,80 +1,80 @@
-import os
-
-from io import BytesIO
 import numpy as np
 import requests
-# Keras
-from tensorflow.keras.applications.imagenet_utils import preprocess_input, decode_predictions
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing import image
-
-from werkzeug.utils import secure_filename
-from flask import Flask, redirect, url_for, request, render_template, jsonify
-
-import tensorflow as tf
+from flask import Flask, request, jsonify
 from PIL import Image
+from io import BytesIO
+from keras.preprocessing import image as keras_image
+import tensorflow as tf
+import pandas as pd
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
-# Define a flask app
+
+
 app = Flask(__name__)
 
- 
-
+# Load the LightGBM model
 model = tf.keras.models.load_model('dsModel.h5')
 
+# Define the label encoder or preprocessing steps if needed
+label = {0: 'BrainTumour', 1: 'Normal',2: 'Stroke',3: 'Alzheimer'}
 
 
 
-def model_predict(img_path, model):
-    img = image.load_img(img_path, target_size=(224, 224))
 
-    # Preprocessing the image
-    x = image.img_to_array(img)
-
-    
-    x = np.expand_dims(x, axis=0)
-   
-
-   
-
-    preds = model.predict(x)
-    preds=np.argmax(preds, axis=1)
-    if preds==0:
-        preds="BrainTumour"
-    elif preds==1:
-        preds="Normal"
-    elif preds==2:
-        preds="Stroke"
-    else:
-        preds="Azhzeimer"
-    
-    
-    return preds
-
-
-@app.route('/', methods=['GET'])
-def index():
-    # Main page
-    return render_template('index.html')
-
-
-@app.route('/predict', methods=['GET', 'POST'])
-def upload():
+@app.route('/predict', methods=['POST'])
+def predict():
     if request.method == 'POST':
-        # Get the file from post request
-        f = request.files['file']
+        try:
+            # Get the JSON data from the request
+            
+            data = request.get_json()
+            # Extract the URL from the JSON data
+            image_url = data.get('url')
+            
+            if image_url:
+                # Fetch the image from the URL
+                response = requests.get(image_url)
+                
+                if response.status_code == 200:
+                    print('Image Received')
+                    # Read the image from the response content
+                    img = Image.open(BytesIO(response.content))
+                    # Preprocess the image
+                    img_gray = img.resize((224, 224))
+                    img=img_gray.convert('RGB')
+                    print('Image converted to RGB')
 
-        # Save the file to ./uploads
-        basepath = os.path.dirname(__file__)
-        file_path = os.path.join(
-            basepath, 'uploads', secure_filename(f.filename))
-        f.save(file_path)
+                    
+                    
+                    img_array = keras_image.img_to_array(img)
+                    print(img_array.shape)
+                    img_array = np.expand_dims(img_array, axis=0)
+                    img_array = img_array / 255.0 
+                    tes_df = pd.DataFrame({'image_data': [img_array]})
+                    tes_datagen = ImageDataGenerator()
+                    img_data_array = np.array([tes_df['image_data'][0]])
+                    img_data_array = np.squeeze(img_data_array, axis=1)
+                    print(img_data_array.shape)
+                    tes_gen = tes_datagen.flow(img_data_array, shuffle=False, batch_size=1)
+                    print('tes_gen')
+                    y_pred = model.predict(tes_gen)
 
-        # Make prediction
-        preds = model_predict(file_path, model)
-        #preds='Brain'
-        result=preds
-        return result
-    return None
+                    print('model Predicted')
+                    ind = int(np.argmax(y_pred, axis=1))
+                        
+                    # Determine the predicted class
+                    predicted_class = label[ind]
+
+                    # Return the prediction result as JSON
+                    return jsonify({'predicted_Disease': predicted_class})
+                else:
+                    return jsonify({'error': 'Failed to fetch image from the URL'})
+            else:
+                return jsonify({'error': 'No image URL provided'})
+        except Exception as e:
+            return jsonify({'error': str(e)})
+    else:
+        return jsonify({'error': 'Invalid request method'})
 
 
 if __name__ == '__main__':
