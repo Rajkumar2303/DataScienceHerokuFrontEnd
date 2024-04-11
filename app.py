@@ -11,12 +11,12 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 
 app = Flask(__name__)
-#CORS(app, resources={r"/predict": {"origins": "http://localhost:3000"}})
+#CORS(app)
 # Load the LightGBM model
-model = tf.keras.models.load_model('dsModel.h5')
+model = tf.keras.models.load_model('CMRmn2.h5')
 
 # Define the label encoder or preprocessing steps if needed
-label = {0: 'BrainTumour', 1: 'Normal',2: 'Stroke',3: 'Alzheimer'}
+label = {0: 'DCM', 1: 'HCM',2: 'MINF',3: 'NORMAL',4: 'RV'}
 
 
 
@@ -26,55 +26,57 @@ def predict():
     if request.method == 'POST':
         try:
             # Get the JSON data from the request
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file part'})
             
-            data = request.get_json()
-            # Extract the URL from the JSON data
-            image_url = data.get('url')
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': 'No selected file'})
             
-            if image_url:
-                # Fetch the image from the URL
-                response = requests.get(image_url)
-                
-                if response.status_code == 200:
-                    print('Image Received')
-                    # Read the image from the response content
-                    img = Image.open(BytesIO(response.content))
-                    # Preprocess the image
-                    img_gray = img.resize((224, 224))
-                    img=img_gray.convert('RGB')
-                    print('Image converted to RGB')
+            if file and allowed_file(file.filename):
 
-                    
-                    
-                    img_array = keras_image.img_to_array(img)
-                    print(img_array.shape)
-                    img_array = np.expand_dims(img_array, axis=0)
-                    img_array = img_array / 255.0 
-                    tes_df = pd.DataFrame({'image_data': [img_array]})
-                    tes_datagen = ImageDataGenerator()
-                    img_data_array = np.array([tes_df['image_data'][0]])
-                    img_data_array = np.squeeze(img_data_array, axis=1)
-                    print(img_data_array.shape)
-                    tes_gen = tes_datagen.flow(img_data_array, shuffle=False, batch_size=1)
-                    print('tes_gen')
-                    y_pred = model.predict(tes_gen)
-
-                    print('model Predicted')
-                    ind = int(np.argmax(y_pred, axis=1))
-                        
-                    # Determine the predicted class
-                    predicted_class = label[ind]
-
-                    # Return the prediction result as JSON
-                    return jsonify({'predicted_Disease': predicted_class})
+                img = Image.open(file)
+                # Preprocess the image
+                img = img.resize((224, 224))
+                if img.mode != 'RGB':
+                    img=img.convert('RGB')
                 else:
-                    return jsonify({'error': 'Failed to fetch image from the URL'})
+                    pass
+   
+                img_array = keras_image.img_to_array(img)
+                
+                img_array = np.expand_dims(img_array, axis=0)
+                img_array = img_array / 255.0 
+                tes_df = pd.DataFrame({'image_data': [img_array]})
+                tes_datagen = ImageDataGenerator()
+                img_data_array = np.array([tes_df['image_data'][0]])
+                img_data_array = np.squeeze(img_data_array, axis=1)
+                
+                tes_gen = tes_datagen.flow(img_data_array, shuffle=False, batch_size=1)
+                
+                y_pred = model.predict(tes_gen)
+
+                
+                ind = int(np.argmax(y_pred, axis=1))
+                        
+                # Determine the predicted class
+                predicted_class = label[ind]
+
+                # Return the prediction result as JSON
+                return jsonify({'predicted_Disease': predicted_class})
+                
             else:
                 return jsonify({'error': 'No image URL provided'})
         except Exception as e:
             return jsonify({'error': str(e)})
     else:
         return jsonify({'error': 'Invalid request method'})
+
+
+# Function to check if file extension is allowed
+def allowed_file(filename):
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 if __name__ == '__main__':
